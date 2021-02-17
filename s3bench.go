@@ -15,8 +15,6 @@
 package main
 
 import (
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"runtime/pprof"
 	"bytes"
 	"crypto/rand"
 	"crypto/tls"
@@ -28,11 +26,14 @@ import (
 	mrand "math/rand"
 	"net/http"
 	"os"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -42,13 +43,12 @@ import (
 )
 
 const (
-	opRead  = "Read"
-	opWrite = "Write"
+	opRead       = "Read"
+	opWrite      = "Write"
 	minChunkSize = 20 * 1024 * 1024
 )
 
 var bufferBytes []byte
-
 
 func main() {
 
@@ -78,10 +78,6 @@ func main() {
 	moreRando := flag.Bool("moreRando", false, "moreRando")
 	chunkSize := flag.Int64("chunkSize", 31*1024, "When using -moreRando : chunk size to defeat dedup.")
 
-
-
-
-
 	flag.Parse()
 
 	if *numClients > *numSamples || *numSamples < 1 {
@@ -95,7 +91,6 @@ func main() {
 		os.Exit(1)
 	}
 	//make sure that the right sizes are used
-
 
 	if *multipart {
 
@@ -146,9 +141,8 @@ func main() {
 		partSize:         *partSize,
 		multiUploaders:   *multiUploaders,
 		disableMD5:       *disableMD5,
-		moreRando:       *moreRando,
-		chunkSize:		 *chunkSize,
-
+		moreRando:        *moreRando,
+		chunkSize:        *chunkSize,
 
 		verbose: *verbose,
 	}
@@ -168,7 +162,6 @@ func main() {
 	}
 
 	mrand.Seed(time.Now().UnixNano())
-
 
 	log.Println("creating bucket if required")
 
@@ -305,8 +298,8 @@ func makeBucket(bucketName *string, svc *s3.S3) {
 func makeData(dataSize int64) []byte {
 
 	/*
-	This just makes XX bytes of random data.  Its kind of slow, so we just run this at the beginning of the job and re-use this buffer over and over.  The side effect is that this dedupe's a lot.
-	Look at the 'betterSlicer' function to see how we deal with this.
+		This just makes XX bytes of random data.  Its kind of slow, so we just run this at the beginning of the job and re-use this buffer over and over.  The side effect is that this dedupe's a lot.
+		Look at the 'betterSlicer' function to see how we deal with this.
 	*/
 
 	fmt.Printf("Generating %v bytes in-memory sample data... ", dataSize)
@@ -323,7 +316,6 @@ func makeData(dataSize int64) []byte {
 	return bufferBytes
 
 }
-
 
 func betterSlicer(chunkSize int64) []byte {
 
@@ -350,12 +342,10 @@ func betterSlicer(chunkSize int64) []byte {
 
 	*/
 
-
 	randStop := int64(len(bufferBytes)) - chunkSize
 
 	randStart := mrand.Int63n(randStop - 1)
 	randEnd := randStart + chunkSize
-
 
 	chunky := bufferBytes[randStart:randEnd]
 
@@ -363,24 +353,21 @@ func betterSlicer(chunkSize int64) []byte {
 
 }
 
-
-
-
-func sliceBuilder(dataSize  int64, moreRando bool, chunkSize int64) []byte {
+func sliceBuilder(dataSize int64, moreRando bool, chunkSize int64) []byte {
 
 	/*
 
 
 
-	try to defeat dedup:
-	1.  use a 31k block size.
-	2.  randomize each segment via betterslicer
-	3.  build a slice per object, use append (slow..)
+		try to defeat dedup:
+		1.  use a 31k block size.
+		2.  randomize each segment via betterslicer
+		3.  build a slice per object, use append (slow..)
 
-	seems like it does defeat dedup, but the cost is high (cuts write perf in half or more)
-	also, it doesn't defeat sim , if the bs=31k. It does mostly defeat sim if you bring the block size down to 1k (but then you get some dedup since it divides into 32k evenly..perhaps 3k is beter..)
+		seems like it does defeat dedup, but the cost is high (cuts write perf in half or more)
+		also, it doesn't defeat sim , if the bs=31k. It does mostly defeat sim if you bring the block size down to 1k (but then you get some dedup since it divides into 32k evenly..perhaps 3k is beter..)
 
-	turns out the assignment might be faster than append, : https://stackoverflow.com/questions/38654729/golang-slice-append-vs-assign-performance
+		turns out the assignment might be faster than append, : https://stackoverflow.com/questions/38654729/golang-slice-append-vs-assign-performance
 
 
 	*/
@@ -389,9 +376,6 @@ func sliceBuilder(dataSize  int64, moreRando bool, chunkSize int64) []byte {
 	byteStorage := make([]byte, chunkSize, dataSize)
 
 	if moreRando {
-
-
-
 
 		//set initial cursor to zero?
 		byteStorage = byteStorage[:0]
@@ -406,13 +390,12 @@ func sliceBuilder(dataSize  int64, moreRando bool, chunkSize int64) []byte {
 				byteStorage = append(byteStorage, betterSlicer(partLength)...)
 			} else { // normal path
 				partLength = chunkSize
-				byteStorage = append(byteStorage, betterSlicer(partLength)...)// this appears to be slow, cuts b/w in half.
+				byteStorage = append(byteStorage, betterSlicer(partLength)...) // this appears to be slow, cuts b/w in half.
 
 			}
 			remaining -= partLength
 			partNumber++
 		}
-
 
 	} else {
 		byteStorage = betterSlicer(dataSize)
@@ -420,10 +403,7 @@ func sliceBuilder(dataSize  int64, moreRando bool, chunkSize int64) []byte {
 
 	return byteStorage
 
-
-
 }
-
 
 func (params *Params) cleanup(svc *s3.S3) {
 	fmt.Println()
@@ -533,6 +513,7 @@ func (params *Params) makeKeyList() []*string {
 
 		}
 	}
+
 	return bigList
 }
 
@@ -540,20 +521,25 @@ func (params *Params) makeKeyList() []*string {
 func (params *Params) submitLoad(op string) {
 
 	/*if we want to do some kind of bucket distribution, this is one place to do it. Another place
-	might be in the makeKeyList function.
-Maybe do like this?
+		might be in the makeKeyList function.
+	Maybe do like this?
 
-	1. count the buckets, and divide up the total number of keys to put (last bucket will get less)
-	2. iterate through the keys, similarly to the makeKeyList function, assining each key to a bucket
-	3.  submit
+		1. count the buckets, and divide up the total number of keys to put (last bucket will get less)
+		2. iterate through the keys, similarly to the makeKeyList function, assining each key to a bucket
+		3.  submit
 
 	*/
 	bucket := aws.String(params.bucketName)
 	bigList := params.makeKeyList()
 
 	// now actually submit the load.
+	randSeed := mrand.NewSource(time.Now().UnixNano())
+	r := mrand.New(randSeed)
 
-	for f := 0; f < len(bigList); f++ {
+
+	//for f := 0; f < len(bigList); f++ {
+	for _, f := range r.Perm(len(bigList)) {
+
 		if op == opWrite {
 
 			if params.multipart {
@@ -687,12 +673,12 @@ func (params *Params) startClient(svc *s3.S3) {
 					partLength = remaining
 					//byteSlice := make([]byte, partLength) //new slice which is the size of the last part
 					//copy(byteSlice, bufferBytes)          //copy bytes from our 'normal' slice into this one. it might be better to
-															// use the betterSlicer for this now (faster?) but its only one part per object, and
-															// its the smaller one..so whatever.
+					// use the betterSlicer for this now (faster?) but its only one part per object, and
+					// its the smaller one..so whatever.
 
 					//actually send the request to the channel.
 					ch <- &s3.UploadPartInput{
-						Body:          bytes.NewReader(sliceBuilder(partLength, params.moreRando, params.chunkSize)),
+						Body: bytes.NewReader(sliceBuilder(partLength, params.moreRando, params.chunkSize)),
 						//Body:          bytes.NewReader(betterSlicer(partLength)),
 						Bucket:        mpu.Bucket,
 						Key:           mpu.Key,
@@ -705,7 +691,7 @@ func (params *Params) startClient(svc *s3.S3) {
 
 					//actually send the request to the channel.
 					ch <- &s3.UploadPartInput{
-						Body:   bytes.NewReader(sliceBuilder(params.partSize, params.moreRando, params.chunkSize)),
+						Body: bytes.NewReader(sliceBuilder(params.partSize, params.moreRando, params.chunkSize)),
 						//Body:          bytes.NewReader(betterSlicer(params.partSize)),
 						Bucket:        mpu.Bucket,
 						Key:           mpu.Key,
@@ -718,9 +704,9 @@ func (params *Params) startClient(svc *s3.S3) {
 				remaining -= partLength
 				partNumber++
 			}
-			close(ch) 			//close the channel
+			close(ch) //close the channel
 
-			wg.Wait()		//now we wait..
+			wg.Wait() //now we wait..
 
 			//sort the parts list once we have all of them. s3 cares that the list is ordered.
 			sort.Sort(partSorter(ph.parts))
@@ -782,12 +768,9 @@ func (a partSorter) Len() int           { return len(a) }
 func (a partSorter) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a partSorter) Less(i, j int) bool { return *a[i].PartNumber < *a[j].PartNumber }
 
-
-
 type partholder struct {
 	parts []*s3.CompletedPart
 }
-
 
 // Specifies the parameters for a given test
 type Params struct {
@@ -811,10 +794,8 @@ type Params struct {
 	endpoints        []string
 	verbose          bool
 	disableMD5       bool
-	moreRando       bool
-	chunkSize       int64
-
-
+	moreRando        bool
+	chunkSize        int64
 }
 
 func (params Params) String() string {
