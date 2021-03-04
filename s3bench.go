@@ -66,7 +66,7 @@ func main() {
 	partSize := flag.Int64("partSize", 500*1024*1024, "size for MPU parts")
 	multiUploaders := flag.Int("multiUploaders", 5, "number of MPU uploaders per client..this is multiplicative with numClients..")
 	bucketName := flag.String("bucket", "bucketname", "the bucket for which to run the test")
-	objectNamePrefix := flag.String("objectNamePrefix", "loadgen_test_", "prefix of the object name that will be used")
+	objectNamePrefix := flag.String("objectNamePrefix", getHostname()+"_loadgen_test/", "prefix of the object name that will be used")
 	objectSize := flag.Int64("objectSize", 80*1024*1024, "size of individual requests in bytes (must be smaller than main memory)")
 	numClients := flag.Int("numClients", 40, "number of concurrent clients")
 	batchSize := flag.Int("batchSize", 1000, "per-prefix batchsize")
@@ -281,11 +281,20 @@ func makeS3session(params Params, endpoint string) *s3.S3 {
 
 }
 
+func getHostname() string {
+	hostName, err := os.Hostname()
+	if err != nil {
+		log.Fatal("couldn't get hostname from machine. you must manaully specify -objectNamePrefix instead: %v ", err)
+		os.Exit(1)
+	}
+	return hostName
+}
+
 // next, a function to create a bucket
 
 func makeBucket(bucketName *string, svc *s3.S3) {
 	cparams := &s3.CreateBucketInput{
-		Bucket: bucketName, // Required
+		Bucket: bucketName, // required
 	}
 	if _, derr := svc.CreateBucket(cparams); derr != nil && !isBucketAlreadyOwnedByYouErr(derr) {
 		log.Fatal(derr)
@@ -535,7 +544,6 @@ func (params *Params) submitLoad(op string) {
 	// now actually submit the load.
 	randSeed := mrand.NewSource(time.Now().UnixNano())
 	r := mrand.New(randSeed)
-
 
 	//for f := 0; f < len(bigList); f++ {
 	for _, f := range r.Perm(len(bigList)) {
