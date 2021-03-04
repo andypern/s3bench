@@ -72,6 +72,7 @@ func main() {
 	batchSize := flag.Int("batchSize", 1000, "per-prefix batchsize")
 	numSamples := flag.Int("numSamples", 200, "total number of requests to send")
 	skipCleanup := flag.Bool("skipCleanup", false, "skip deleting objects created by this tool at the end of the run")
+	skipBucketCreate := flag.Bool("skipBucketCreate", false, "skip pre-creation of bucket. bucket MUST exist for this to work.")
 	verbose := flag.Bool("verbose", false, "print verbose per thread status")
 	disableMD5 := flag.Bool("disableMD5", true, "for v4 auth: disable source md5sum calcs (faster)")
 	cpuprofile := flag.Bool("cpuprofile", false, "profile this mofo")
@@ -162,12 +163,17 @@ func main() {
 	}
 
 	mrand.Seed(time.Now().UnixNano())
-
-	log.Println("creating bucket if required")
+	//make a session for makebucket and cleanup purposes.
 
 	svc := makeS3session(params, params.endpoints[0])
 
-	makeBucket(bucketName, svc)
+	if !*skipBucketCreate {
+		log.Println("creating bucket if required")
+
+		makeBucket(bucketName, svc)
+	} else {
+		log.Println("skipping bucket creation..it better exist!")
+	}
 
 	/*
 		function flow:
@@ -298,6 +304,8 @@ func makeBucket(bucketName *string, svc *s3.S3) {
 	}
 	if _, derr := svc.CreateBucket(cparams); derr != nil && !isBucketAlreadyOwnedByYouErr(derr) {
 		log.Fatal(derr)
+	} else {
+		fmt.Printf("made bucket: %v, or this err: %v", bucketName, derr)
 	}
 
 }
