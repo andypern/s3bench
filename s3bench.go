@@ -304,11 +304,24 @@ func makeBucket(bucketName *string, svc *s3.S3) {
 	}
 	if _, derr := svc.CreateBucket(cparams); derr != nil && !isBucketAlreadyOwnedByYouErr(derr) {
 		log.Fatal(derr)
-	} else {
-		fmt.Printf("made bucket: %v, or this err: %v", bucketName, derr)
 	}
 
 }
+
+//for the cleanup phase, delete the bucket
+
+func delBucket(bucketName *string, svc *s3.S3) {
+	cparams := &s3.DeleteBucketInput{
+		Bucket: bucketName, // required
+	}
+	if _, derr := svc.DeleteBucket(cparams); derr != nil  {
+		log.Fatal(derr)
+	}
+	fmt.Printf("deleted bucket %v\n", *bucketName)
+
+
+}
+
 
 // function to generate data
 
@@ -423,6 +436,12 @@ func sliceBuilder(dataSize int64, moreRando bool, chunkSize int64) []byte {
 }
 
 func (params *Params) cleanup(svc *s3.S3) {
+
+	/*
+this is single threaded, running against only a single endpoint (the same one which is used for makebucket).  It may be useful to
+parallelize this, but for now..its relatively quick.
+
+	*/
 	fmt.Println()
 	fmt.Printf("Cleaning up %d objects...\n", params.numSamples)
 	delStartTime := time.Now()
@@ -439,15 +458,20 @@ func (params *Params) cleanup(svc *s3.S3) {
 
 		keyList = append(keyList, &bar)
 		if len(keyList) == params.batchSize || i == params.numSamples-1 {
-			fmt.Printf("Deleting a batch of %d objects in range {%d, %d}... ", len(keyList), i-len(keyList)+1, i)
-			params := &s3.DeleteObjectsInput{
+			if params.verbose {
+				fmt.Printf("Deleting a batch of %d objects in range {%d, %d}... ", len(keyList), i-len(keyList)+1, i)
+			}
+			delparams := &s3.DeleteObjectsInput{
 				Bucket: aws.String(params.bucketName),
 				Delete: &s3.Delete{
 					Objects: keyList}}
-			_, err := svc.DeleteObjects(params)
+			_, err := svc.DeleteObjects(delparams)
 			if err == nil {
 				numSuccessfullyDeleted += len(keyList)
-				fmt.Printf("Succeeded\n")
+				if params.verbose {
+
+					fmt.Printf("Succeeded\n")
+				}
 			} else {
 				fmt.Printf("Failed (%v)\n", err)
 			}
@@ -458,6 +482,11 @@ func (params *Params) cleanup(svc *s3.S3) {
 		i++
 	}
 	fmt.Printf("Successfully deleted %d/%d objects in %s\n", numSuccessfullyDeleted, params.numSamples, time.Since(delStartTime))
+
+	// delete the bucket
+
+	delBucket(&params.bucketName, svc)
+
 }
 
 func isBucketAlreadyOwnedByYouErr(err error) bool {

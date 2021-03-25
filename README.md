@@ -5,9 +5,14 @@ series of get operations and displays the corresponding statistics. The tool
 uses the AWS Go SDK.
 
 ## Requirements
-* Go
+This has been tested on various *nix platforms (mainly linux), as well as MacOS.  It has not been tested on windows.
 
 ## Installation
+
+You can always grab the latest statically compiled binary (for linux x86_64) from <https://github.com/andypern/s3bench/raw/master/s3bench>
+
+Alternatively, you can build from source.
+
 Run the following command to build the binary.
 
 ```
@@ -30,13 +35,6 @@ If you lack a proper go environment to build on, use docker.  Toss this in a `Do
 The s3bench command is self-describing. In order to see all the available options
 just run s3bench -help.
 
-### Note on multipart
-Specifying `-multipart` will only impact writes, not reads (so far).  The current multipart implementation does NOT use the `s3manager` package, rather it is creating parts individually and sending them in parallel per object. Also:
-* The program will generate `-partsize` bytes of random data to use. Each part will be 100% identical (except for the last part, which is smaller).  This will be changed to be more random later.
-* specifying `-numClients` starts up XX sessions, which translates to maximum concurrent object-uploads: however each object-upload will leverage `-multiUploaders` , so the effect is multiplicative.  Use with care.  Put another way:
-   * `-numclients 10` && `-multiUploaders 10` means there will be 100 concurrent threads uploading.
-* you can specify `-partSize` in bytes.  Note that the minimum supported by the SDK is 5MiB.
-
 
 ### Example input
 The following will run a benchmark from 2 concurrent sessions, which in
@@ -49,7 +47,30 @@ http://endpoint2:80. Object name will be prefixed with loadgen.
 ./s3bench -accessKey=KEY -accessSecret=SECRET -bucket=loadgen -endpoint=http://endpoint1:80,http://endpoint2:80 -numClients=2 -numSamples=10 -objectNamePrefix=loadgen -objectSize=1024
 ```
 
-#### Note on regions & endpoints
+
+### Running on multiple hosts
+
+While `s3bench` does not have a facility built-in to perform multi-host parallelization, one can use `clush` ( < https://clustershell.readthedocs.io/en/latest/ > ) , pssh, pdsh, or similar tools to run simultaneously on multiple clients.  Here are a couple simple examples, note the use of quotes and escaping of `$` variables in some cases
+
+```
+clush -g cb2 "/home/vastdata/s3bench \
+-accessKey $AWS_ACCESS_KEY_ID \
+-accessSecret $AWS_SECRET_ACCESS_KEY \
+-bucket \$(hostname)-benchmark -endpoint \
+$(echo http://172.200.3.{1..8},|sed "s/ //g"|sed "s/,$//") \
+-numClients 80 \
+-numSamples 1000 \
+-objectSize \$((100*1024*1024)) \
+-operations both \
+-skipCleanup"
+
+
+```
+
+
+
+
+### Note on regions & endpoints
 By default, the region used will be `vast-west` , a fictitious region which
 is suitable for using with the VAST systems.  However, you can elect to
 use this tool with Amazon S3, in which case you will need to specify the proper region.
@@ -63,6 +84,16 @@ testing is in Oregon, you would specify:
 ```
 
 For more information on this, please refer to [AmazonS3 documentation.](https://aws.amazon.com/documentation/s3/)
+
+
+### Note on multipart
+Specifying `-multipart` will only impact writes, not reads (so far).  The current multipart implementation does NOT use the `s3manager` package, rather it is creating parts individually and sending them in parallel per object. Also:
+* The program will generate `-partsize` bytes of random data to use. Each part will be 100% identical (except for the last part, which is smaller).  This will be changed to be more random later.
+* specifying `-numClients` starts up XX sessions, which translates to maximum concurrent object-uploads: however each object-upload will leverage `-multiUploaders` , so the effect is multiplicative.  Use with care.  Put another way:
+   * `-numclients 10` && `-multiUploaders 10` means there will be 100 concurrent threads uploading.
+* you can specify `-partSize` in bytes.  Note that the minimum supported by the SDK is 5MiB.
+
+
 
 
 
