@@ -45,6 +45,7 @@ import (
 const (
 	opRead       = "Read"
 	opWrite      = "Write"
+	opRangedRead = "Ranged-Read"
 	minChunkSize = 20 * 1024 * 1024
 )
 
@@ -54,9 +55,8 @@ func main() {
 
 	// really need to split this thing up into more functions one day.
 
-	optypes := []string{"read", "write", "both"}
+	optypes := []string{"read", "write", "both", "ranges"}
 	operationListString := strings.Join(optypes[:], ", ")
-
 	endpoint := flag.String("endpoint", "", "S3 endpoint(s) comma separated - http://IP:PORT,http://IP:PORT")
 	region := flag.String("region", "vast-west", "AWS region to use, eg: us-west-1|us-east-1, etc")
 	accessKey := flag.String("accessKey", "", "the S3 access key")
@@ -68,6 +68,8 @@ func main() {
 	bucketName := flag.String("bucket", "bucketname", "the bucket for which to run the test")
 	objectNamePrefix := flag.String("objectNamePrefix", getHostname()+"_loadgen_test/", "prefix of the object name that will be used")
 	objectSize := flag.Int64("objectSize", 80*1024*1024, "size of individual requests in bytes (must be smaller than main memory)")
+	rangeSize := flag.Int64("rangeSize", 1024, "when specifying -operations ranges , this is the range size.")
+	numRequests := flag.Int64("numRequests", 10*1024, "when specifying -operations ranges , this is the total number of requests to issue.")
 	numClients := flag.Int("numClients", 40, "number of concurrent clients")
 	batchSize := flag.Int("batchSize", 1000, "per-prefix batchsize")
 	numSamples := flag.Int("numSamples", 200, "total number of requests to send")
@@ -81,10 +83,18 @@ func main() {
 
 	flag.Parse()
 
-	if *numClients > *numSamples || *numSamples < 1 {
-		fmt.Printf("numClients(%d) needs to be less than numSamples(%d) and greater than 0\n", *numClients, *numSamples)
-		os.Exit(1)
+	//for ranged reads...we can have more clients than files.
+	if strings.Contains(*operations, "ranges") {
+		fmt.Printf("Doing ranged reads with %d threads vs %d objects\n", *numClients, *numSamples)
+
+	}else {
+		if *numClients > *numSamples || *numSamples < 1 {
+
+			fmt.Printf("numClients(%d) needs to be less than numSamples(%d) and greater than 0\n", *numClients, *numSamples)
+			os.Exit(1)
+		}
 	}
+	
 
 	if *endpoint == "" {
 		fmt.Println("You need to specify endpoint(s)")
@@ -128,6 +138,8 @@ func main() {
 		requests:         make(chan Req),
 		responses:        make(chan Resp),
 		numSamples:       *numSamples,
+		rangeSize:		  *rangeSize,
+		numRequests:	  *numRequests,
 		batchSize:        *batchSize,
 		numClients:       uint(*numClients),
 		objectSize:       *objectSize,
@@ -237,6 +249,15 @@ func main() {
 
 		fmt.Println()
 
+	} else if strings.Contains(params.operations, "ranges") {
+
+			fmt.Printf("Running %s test...\n", opRangedRead)
+			readResult := params.Run(opRangedRead)
+			fmt.Println(params)
+			fmt.Println(readResult)
+	
+			fmt.Println()
+
 	} else if strings.Contains(params.operations, "both") {
 		if *multipart {
 			chunkSize := *partSize * 2
@@ -295,6 +316,9 @@ func getHostname() string {
 	}
 	return hostName
 }
+
+
+
 
 // next, a function to create a bucket
 
@@ -498,13 +522,21 @@ func isBucketAlreadyOwnedByYouErr(err error) bool {
 
 func (params *Params) Run(op string) Result {
 	startTime := time.Now()
+	//need to make a clause for ranged reads.
+	var reqCount int
+	if strings.Contains(params.operations, "ranges") {
+		reqCount = int(params.numRequests)
+	}else {
+		reqCount = params.numSamples
+	}
 
 	// Start submitting load requests
 	go params.submitLoad(op)
 
 	// Collect and aggregate stats for completed requests
-	result := Result{opDurations: make([]float64, 0, params.numSamples), operation: op}
-	for i := 0; i < params.numSamples; i++ {
+	result := Result{opDurations: make([]float64, 0, reqCount), operation: op}
+
+	for i := 0; i < reqCount; i++ {
 		resp := <-params.responses
 		errorString := ""
 		if resp.err != nil {
@@ -512,7 +544,13 @@ func (params *Params) Run(op string) Result {
 			fmt.Printf("error: %s", resp.err)
 			errorString = fmt.Sprintf(", error: %s", resp.err)
 		} else {
-			result.bytesTransmitted = result.bytesTransmitted + params.objectSize
+			result.numOps++
+			//TODO need to adjust this for ranged-reads.
+			if strings.Contains(params.operations, "ranges") {
+				result.bytesTransmitted = result.bytesTransmitted + params.rangeSize
+			}else {
+				result.bytesTransmitted = result.bytesTransmitted + params.objectSize
+			}
 			result.opDurations = append(result.opDurations, resp.duration.Seconds())
 		}
 		if params.verbose {
@@ -578,40 +616,75 @@ func (params *Params) submitLoad(op string) {
 	bucket := aws.String(params.bucketName)
 	bigList := params.makeKeyList()
 
-	// now actually submit the load.
+	// this is so we randomize the list iteration.
 	randSeed := mrand.NewSource(time.Now().UnixNano())
 	r := mrand.New(randSeed)
 
-	//for f := 0; f < len(bigList); f++ {
-	for _, f := range r.Perm(len(bigList)) {
+//  this is where we create all the requests, one per key.  
+	// now actually submit the load. each iteration chooses a random key from the list.
+	// inefficient, but for ranged reads we need a whole separate block for now.
 
-		if op == opWrite {
+	if op != opRangedRead {
+		for _, f := range r.Perm(len(bigList)) {
 
-			if params.multipart {
-				// once per object, there will be a separate setup for individual parts.
-				params.requests <- &s3.CreateMultipartUploadInput{
+			if op == opWrite {
+
+				if params.multipart {
+					// once per object, there will be a separate setup for individual parts.
+					params.requests <- &s3.CreateMultipartUploadInput{
+						Bucket: bucket,
+						Key:    bigList[f],
+					}
+				} else {
+					//not multipart
+
+					params.requests <- &s3.PutObjectInput{
+						Bucket: bucket,
+						Key:    bigList[f],
+						Body:   bytes.NewReader(sliceBuilder(params.objectSize, params.moreRando, params.chunkSize)),
+						//Body:   bytes.NewReader(betterSlicer(params.objectSize)),
+					}
+				}
+			} else if op == opRead {
+
+				params.requests <- &s3.GetObjectInput{
 					Bucket: bucket,
 					Key:    bigList[f],
 				}
 			} else {
-				//not multipart
-
-				params.requests <- &s3.PutObjectInput{
-					Bucket: bucket,
-					Key:    bigList[f],
-					Body:   bytes.NewReader(sliceBuilder(params.objectSize, params.moreRando, params.chunkSize)),
-					//Body:   bytes.NewReader(betterSlicer(params.objectSize)),
-				}
+				panic("Developer error")
 			}
-		} else if op == opRead {
+		}
+	} else { // ranged read block
+		/*for the 'ranged-read' operation type, we need to do
+		something different.
+		1.  decide on a runtime (or number of requests. perhaps numrequests is easier)
+		2.  for each request, randomize:
+			* a key from the bigList
+			* the offset/range
+		*/
+
+		for i := 0; i <  int(params.numRequests); i++ {
+		//randomize the key.
+		randoKey := bigList[mrand.Intn(len(bigList))]
+
+		//make a random offset. 
+		stopMax := int64(params.objectSize) - params.rangeSize //this is the HIGHEST value to choose for randstop
+		randStart := mrand.Int63n(stopMax - 1)
+		randStop := (randStart - 1 ) + params.rangeSize
+		rangeString := "bytes=" + strconv.FormatInt(randStart, 10) + "-" + strconv.FormatInt(randStop, 10)
 
 			params.requests <- &s3.GetObjectInput{
 				Bucket: bucket,
-				Key:    bigList[f],
+				Key:    randoKey,
+				Range:  aws.String(rangeString),
+
 			}
-		} else {
-			panic("Developer error")
+
 		}
+
+		
+
 	}
 
 }
@@ -672,8 +745,16 @@ func (params *Params) startClient(svc *s3.S3) {
 				} else {
 					fmt.Printf("there was a read error: %v , %v", resp, err)
 				}
-				if numBytes != params.objectSize {
-					err = fmt.Errorf("expected object length %d, actual %d", params.objectSize, numBytes)
+				if strings.Contains(params.operations, "ranges") {
+				//if doing ranged reads, use an alternate calc.
+					if numBytes != params.rangeSize {
+						err = fmt.Errorf("expected range length %d, actual %d", params.rangeSize, numBytes)
+					}
+				
+				}else {
+					if numBytes != params.objectSize {
+						err = fmt.Errorf("expected object length %d, actual %d", params.objectSize, numBytes)
+					}
 				}
 			}
 
@@ -828,6 +909,8 @@ type Params struct {
 	batchSize        int
 	numClients       uint
 	objectSize       int64
+	rangeSize       int64
+	numRequests	    int64
 	partSize         int64
 	multiUploaders   int
 	multipart        bool
@@ -865,6 +948,11 @@ func (params Params) String() string {
 
 	output += fmt.Sprintf("numClients:       %d\n", params.numClients)
 	output += fmt.Sprintf("numSamples:       %d\n", params.numSamples)
+	if strings.Contains(params.operations, "ranges") {
+		output += fmt.Sprintf("totalRequests:       %d\n", params.numRequests)
+
+	}
+	
 	output += fmt.Sprintf("batchSize:       %d\n", params.batchSize)
 	if params.multipart {
 		output += fmt.Sprintf("multipart enabled:       %v\n", params.multipart)
@@ -872,8 +960,8 @@ func (params Params) String() string {
 	}
 	//calculate the total size of the test
 	totalSize := int64(params.numSamples) * params.objectSize
-	output += fmt.Sprintf("Total size of test : %0.4f GB\n", float64(totalSize)/(1024*1024*1024))
-
+	output += fmt.Sprintf("Total size of data set : %0.4f GB\n", float64(totalSize)/(1024*1024*1024))
+    
 	output += fmt.Sprintf("verbose:       %v\n", params.verbose)
 	return output
 }
@@ -883,6 +971,7 @@ type Result struct {
 	operation        string
 	bytesTransmitted int64
 	numErrors        int
+	numOps       int64
 	opDurations      []float64
 	totalDuration    time.Duration
 }
@@ -891,17 +980,18 @@ func (r Result) String() string {
 	report := fmt.Sprintf("Results Summary for %s Operation(s)\n", r.operation)
 	report += fmt.Sprintf("Total Transferred: %0.3f MB\n", float64(r.bytesTransmitted)/(1024*1024))
 	report += fmt.Sprintf("Total Throughput:  %0.2f MB/s\n", (float64(r.bytesTransmitted)/(1024*1024))/r.totalDuration.Seconds())
+	report += fmt.Sprintf("Ops/sec:  %0.2f ops/s\n", float64(r.numOps)/r.totalDuration.Seconds())
 	report += fmt.Sprintf("Total Duration:    %0.3f s\n", r.totalDuration.Seconds())
 	report += fmt.Sprintf("Number of Errors:  %d\n", r.numErrors)
 	if len(r.opDurations) > 0 {
 		report += fmt.Sprintln("------------------------------------")
-		report += fmt.Sprintf("%s times Max:       %0.3f s\n", r.operation, r.percentile(100))
-		report += fmt.Sprintf("%s times 99th %%ile: %0.3f s\n", r.operation, r.percentile(99))
-		report += fmt.Sprintf("%s times 90th %%ile: %0.3f s\n", r.operation, r.percentile(90))
-		report += fmt.Sprintf("%s times 75th %%ile: %0.3f s\n", r.operation, r.percentile(75))
-		report += fmt.Sprintf("%s times 50th %%ile: %0.3f s\n", r.operation, r.percentile(50))
-		report += fmt.Sprintf("%s times 25th %%ile: %0.3f s\n", r.operation, r.percentile(25))
-		report += fmt.Sprintf("%s times Min:       %0.3f s\n", r.operation, r.percentile(0))
+		report += fmt.Sprintf("%s times Max:       %0.4f s\n", r.operation, r.percentile(100))
+		report += fmt.Sprintf("%s times 99th %%ile: %0.4f s\n", r.operation, r.percentile(99))
+		report += fmt.Sprintf("%s times 90th %%ile: %0.4f s\n", r.operation, r.percentile(90))
+		report += fmt.Sprintf("%s times 75th %%ile: %0.4f s\n", r.operation, r.percentile(75))
+		report += fmt.Sprintf("%s times 50th %%ile: %0.4f s\n", r.operation, r.percentile(50))
+		report += fmt.Sprintf("%s times 25th %%ile: %0.4f s\n", r.operation, r.percentile(25))
+		report += fmt.Sprintf("%s times Min:       %0.4f s\n", r.operation, r.percentile(0))
 	}
 	return report
 }
