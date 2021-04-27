@@ -950,7 +950,6 @@ func (params Params) String() string {
 	output += fmt.Sprintf("numSamples:       %d\n", params.numSamples)
 	if strings.Contains(params.operations, "ranges") {
 		output += fmt.Sprintf("totalRequests:       %d\n", params.numRequests)
-
 	}
 	
 	output += fmt.Sprintf("batchSize:       %d\n", params.batchSize)

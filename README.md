@@ -9,9 +9,14 @@ This has been tested on various *nix platforms (mainly linux), as well as MacOS.
 
 ## Installation
 
+### Docker
+
+```docker pull andypern/s3bench```
+
+### Static Binary
 You can always grab the latest statically compiled binary (for linux x86_64) from <https://github.com/andypern/s3bench/raw/master/s3bench>
 
-Alternatively, you can build from source.
+### Building from Source
 
 Run the following command to build the binary.
 
@@ -26,15 +31,24 @@ manual compile:
 go build -ldflags "-linkmode external -extldflags -static"
 ```
 
-If you lack a proper go environment to build on, use docker.  Toss this in a `Dockerfile` and you should have what you need: 
 
-```FROM golang:1.13.5-alpine3.10```
-
+If you lack a proper go environment to build on, use Docker. Check the `Dockerfile` in this repo to determine the build dependancies.
 
 ## Usage
 The s3bench command is self-describing. In order to see all the available options
 just run s3bench -help.
 
+### IO profiles (-operations)
+
+These are the  `-operations` which are supported:
+
+* write : this will measure object PUTs (both regular and multipart).  
+* read : this will measure object GETs (both regular and multipart).  Note that you MUST run this against a bucket/objNameprefix which you previously ran a `-operations write` or `-operations both` test.
+* both : this will first run writes, then reads.
+* ranges : this is a special case just for 'ranged reads'.  It will perform random partial reads against existing objects (which you must create beforehand using `-operations write`).  It requires some supplemental flags:
+    * `-rangeSize` : defaults to 1024 bytes (1KiB).  This is the size of each read request.
+    * `-numRequests` : defaults to 10240.  This is the total number of requests that the test will execute, regardless of the number of threads (`-numClients`).
+    * `-numSamples` : defaults to 200.  The number of files to distribute (randomly) the ranged read requests across.  This can be as few as 1.  Note that you will need to ensure that at least this many objects already exist with the correct bucket & objectNamePrefix , by using `-operations write` in a previous run.
 
 ### Example input
 The following will run a benchmark from 2 concurrent sessions, which in
@@ -61,8 +75,7 @@ $(echo http://172.200.3.{1..8},|sed "s/ //g"|sed "s/,$//") \
 -numClients 80 \
 -numSamples 1000 \
 -objectSize \$((100*1024*1024)) \
--operations both \
--skipCleanup"
+-operations both"
 
 
 ```
@@ -104,74 +117,57 @@ operations will be displayed.
 
 ```
 Test parameters
-endpoint(s):      [http://endpoint1:80 http://endpoint2:80]
-bucket:           loadgen
-objectNamePrefix: loadgen
-objectSize:       0.0010 MB
-numClients:       2
-numSamples:       10
+endpoint(s):      [http://172.200.3.1 http://172.200.3.2 http://172.200.3.3 http://172.200.3.4 http://172.200.3.5 http://172.200.3.6 http://172.200.3.7 http://172.200.3.8]
+bucket:           selab-cb9-c3
+objectNamePrefix: selab-cb9-c3_loadgen_test/
+objectSize:       100.0000 MB
+numClients:       80
+numSamples:       1000
+batchSize:       1000
+Total size of data set : 97.6562 GB
+verbose:       false
 
 
-Generating in-memory sample data... Done (95.958µs)
+2021/04/27 23:05:42 creating bucket if required
+Generating 209715200 bytes in-memory sample data... Done (1.554669803s)
 
 Running Write test...
-Write operation completed in 0.37s (1/10) - 0.00MB/s
-Write operation completed in 0.39s (2/10) - 0.01MB/s
-Write operation completed in 0.34s (3/10) - 0.00MB/s
-Write operation completed in 0.72s (4/10) - 0.00MB/s
-Write operation completed in 0.53s (5/10) - 0.00MB/s
-Write operation completed in 0.38s (6/10) - 0.00MB/s
-Write operation completed in 0.54s (7/10) - 0.00MB/s
-Write operation completed in 0.59s (8/10) - 0.00MB/s
-Write operation completed in 0.79s (9/10) - 0.00MB/s
-Write operation completed in 0.60s (10/10) - 0.00MB/s
-
 Running Read test...
-Read operation completed in 0.00s (1/10) - 0.51MB/s
-Read operation completed in 0.00s (2/10) - 1.00MB/s
-Read operation completed in 0.00s (3/10) - 0.85MB/s
-Read operation completed in 0.00s (4/10) - 1.13MB/s
-Read operation completed in 0.00s (5/10) - 1.02MB/s
-Read operation completed in 0.00s (6/10) - 1.15MB/s
-Read operation completed in 0.00s (7/10) - 1.12MB/s
-Read operation completed in 0.00s (8/10) - 1.26MB/s
-Read operation completed in 0.00s (9/10) - 1.20MB/s
-Read operation completed in 0.00s (10/10) - 1.28MB/s
-
-Test parameters
-endpoint(s):      [http://endpoint1:80 http://endpoint2:80]
-bucket:           loadgen
-objectNamePrefix: loadgen
-objectSize:       0.0010 MB
-numClients:       2
-numSamples:       10
-
 Results Summary for Write Operation(s)
-Total Transferred: 0.010 MB
-Total Throughput:  0.00 MB/s
-Total Duration:    2.684 s
+Total Transferred: 100000.000 MB
+Total Throughput:  4248.42 MB/s
+Ops/sec:  42.48 ops/s
+Total Duration:    23.538 s
 Number of Errors:  0
 ------------------------------------
-Put times Max:       0.791 s
-Put times 99th %ile: 0.791 s
-Put times 90th %ile: 0.791 s
-Put times 75th %ile: 0.601 s
-Put times 50th %ile: 0.543 s
-Put times 25th %ile: 0.385 s
-Put times Min:       0.336 s
+Write times Max:       2.9262 s
+Write times 99th %ile: 2.7422 s
+Write times 90th %ile: 2.5406 s
+Write times 75th %ile: 2.2856 s
+Write times 50th %ile: 1.8921 s
+Write times 25th %ile: 0.9137 s
+Write times Min:       0.3677 s
 
 
 Results Summary for Read Operation(s)
-Total Transferred: 0.010 MB
-Total Throughput:  1.28 MB/s
-Total Duration:    0.008 s
+Total Transferred: 100000.000 MB
+Total Throughput:  10554.29 MB/s
+Ops/sec:  105.54 ops/s
+Total Duration:    9.475 s
 Number of Errors:  0
 ------------------------------------
-Put times Max:       0.002 s
-Put times 99th %ile: 0.002 s
-Put times 90th %ile: 0.002 s
-Put times 75th %ile: 0.002 s
-Put times 50th %ile: 0.001 s
-Put times 25th %ile: 0.001 s
-Put times Min:       0.001 s
+Read times Max:       1.8492 s
+Read times 99th %ile: 1.5404 s
+Read times 90th %ile: 1.0935 s
+Read times 75th %ile: 0.9415 s
+Read times 50th %ile: 0.7914 s
+Read times 25th %ile: 0.4691 s
+Read times Min:       0.1365 s
+
+
+
+Cleaning up 1000 objects...
+Successfully deleted 1000/1000 objects in 3.618969207s
+deleted bucket selab-cb9-c3
+
 ```
