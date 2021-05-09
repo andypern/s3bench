@@ -426,9 +426,13 @@ func sliceBuilder(dataSize int64, moreRando bool, chunkSize int64) []byte {
 
 	*/
 	//make a slice
+	// for objects smaller than the 31k chunksize, need to shrink the chunksize to  match.
+	if chunkSize > dataSize {
+		chunkSize = dataSize
+	}
+	
 
 	byteStorage := make([]byte, chunkSize, dataSize)
-
 	if moreRando {
 
 		//set initial cursor to zero?
