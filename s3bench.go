@@ -87,14 +87,13 @@ func main() {
 	if strings.Contains(*operations, "ranges") {
 		fmt.Printf("Doing ranged reads with %d threads vs %d objects\n", *numClients, *numSamples)
 
-	}else {
+	} else {
 		if *numClients > *numSamples || *numSamples < 1 {
 
 			fmt.Printf("numClients(%d) needs to be less than numSamples(%d) and greater than 0\n", *numClients, *numSamples)
 			os.Exit(1)
 		}
 	}
-	
 
 	if *endpoint == "" {
 		fmt.Println("You need to specify endpoint(s)")
@@ -138,8 +137,8 @@ func main() {
 		requests:         make(chan Req),
 		responses:        make(chan Resp),
 		numSamples:       *numSamples,
-		rangeSize:		  *rangeSize,
-		numRequests:	  *numRequests,
+		rangeSize:        *rangeSize,
+		numRequests:      *numRequests,
 		batchSize:        *batchSize,
 		numClients:       uint(*numClients),
 		objectSize:       *objectSize,
@@ -251,12 +250,12 @@ func main() {
 
 	} else if strings.Contains(params.operations, "ranges") {
 
-			fmt.Printf("Running %s test...\n", opRangedRead)
-			readResult := params.Run(opRangedRead)
-			fmt.Println(params)
-			fmt.Println(readResult)
-	
-			fmt.Println()
+		fmt.Printf("Running %s test...\n", opRangedRead)
+		readResult := params.Run(opRangedRead)
+		fmt.Println(params)
+		fmt.Println(readResult)
+
+		fmt.Println()
 
 	} else if strings.Contains(params.operations, "both") {
 		if *multipart {
@@ -317,16 +316,16 @@ func getHostname() string {
 	return hostName
 }
 
-
-
-
 // next, a function to create a bucket
 
 func makeBucket(bucketName *string, svc *s3.S3) {
 	cparams := &s3.CreateBucketInput{
 		Bucket: bucketName, // required
 	}
-	if _, derr := svc.CreateBucket(cparams); derr != nil && !isBucketAlreadyOwnedByYouErr(derr) {
+	//	if _, derr := svc.CreateBucket(cparams); derr != nil && !isBucketAlreadyOwnedByYouErr(derr) {
+
+	if _, derr := svc.CreateBucket(cparams); derr != nil && !bucketExists(derr) {
+
 		log.Fatal(derr)
 	}
 
@@ -338,14 +337,12 @@ func delBucket(bucketName *string, svc *s3.S3) {
 	cparams := &s3.DeleteBucketInput{
 		Bucket: bucketName, // required
 	}
-	if _, derr := svc.DeleteBucket(cparams); derr != nil  {
+	if _, derr := svc.DeleteBucket(cparams); derr != nil {
 		log.Fatal(derr)
 	}
 	fmt.Printf("deleted bucket %v\n", *bucketName)
 
-
 }
-
 
 // function to generate data
 
@@ -430,7 +427,6 @@ func sliceBuilder(dataSize int64, moreRando bool, chunkSize int64) []byte {
 	if chunkSize > dataSize {
 		chunkSize = dataSize
 	}
-	
 
 	byteStorage := make([]byte, chunkSize, dataSize)
 	if moreRando {
@@ -466,8 +462,8 @@ func sliceBuilder(dataSize int64, moreRando bool, chunkSize int64) []byte {
 func (params *Params) cleanup(svc *s3.S3) {
 
 	/*
-this is single threaded, running against only a single endpoint (the same one which is used for makebucket).  It may be useful to
-parallelize this, but for now..its relatively quick.
+		this is single threaded, running against only a single endpoint (the same one which is used for makebucket).  It may be useful to
+		parallelize this, but for now..its relatively quick.
 
 	*/
 	fmt.Println()
@@ -517,9 +513,17 @@ parallelize this, but for now..its relatively quick.
 
 }
 
-func isBucketAlreadyOwnedByYouErr(err error) bool {
+func bucketExists(err error) bool {
+
+	// there might be two different responses, depending on implementation.
+
 	if aErr, ok := err.(awserr.Error); ok {
-		return aErr.Code() == s3.ErrCodeBucketAlreadyOwnedByYou
+		switch aErr.Code() {
+		case s3.ErrCodeBucketAlreadyOwnedByYou:
+			return aErr.Code() == s3.ErrCodeBucketAlreadyOwnedByYou
+		case s3.ErrCodeBucketAlreadyExists:
+			return aErr.Code() == s3.ErrCodeBucketAlreadyExists
+		}
 	}
 	return false
 }
@@ -530,7 +534,7 @@ func (params *Params) Run(op string) Result {
 	var reqCount int
 	if strings.Contains(params.operations, "ranges") {
 		reqCount = int(params.numRequests)
-	}else {
+	} else {
 		reqCount = params.numSamples
 	}
 
@@ -552,7 +556,7 @@ func (params *Params) Run(op string) Result {
 			//TODO need to adjust this for ranged-reads.
 			if strings.Contains(params.operations, "ranges") {
 				result.bytesTransmitted = result.bytesTransmitted + params.rangeSize
-			}else {
+			} else {
 				result.bytesTransmitted = result.bytesTransmitted + params.objectSize
 			}
 			result.opDurations = append(result.opDurations, resp.duration.Seconds())
@@ -624,7 +628,7 @@ func (params *Params) submitLoad(op string) {
 	randSeed := mrand.NewSource(time.Now().UnixNano())
 	r := mrand.New(randSeed)
 
-//  this is where we create all the requests, one per key.  
+	//  this is where we create all the requests, one per key.
 	// now actually submit the load. each iteration chooses a random key from the list.
 	// inefficient, but for ranged reads we need a whole separate block for now.
 
@@ -668,26 +672,23 @@ func (params *Params) submitLoad(op string) {
 			* the offset/range
 		*/
 
-		for i := 0; i <  int(params.numRequests); i++ {
-		//randomize the key.
-		randoKey := bigList[mrand.Intn(len(bigList))]
+		for i := 0; i < int(params.numRequests); i++ {
+			//randomize the key.
+			randoKey := bigList[mrand.Intn(len(bigList))]
 
-		//make a random offset. 
-		stopMax := int64(params.objectSize) - params.rangeSize //this is the HIGHEST value to choose for randstop
-		randStart := mrand.Int63n(stopMax - 1)
-		randStop := (randStart - 1 ) + params.rangeSize
-		rangeString := "bytes=" + strconv.FormatInt(randStart, 10) + "-" + strconv.FormatInt(randStop, 10)
+			//make a random offset.
+			stopMax := int64(params.objectSize) - params.rangeSize //this is the HIGHEST value to choose for randstop
+			randStart := mrand.Int63n(stopMax - 1)
+			randStop := (randStart - 1) + params.rangeSize
+			rangeString := "bytes=" + strconv.FormatInt(randStart, 10) + "-" + strconv.FormatInt(randStop, 10)
 
 			params.requests <- &s3.GetObjectInput{
 				Bucket: bucket,
 				Key:    randoKey,
 				Range:  aws.String(rangeString),
-
 			}
 
 		}
-
-		
 
 	}
 
@@ -750,12 +751,12 @@ func (params *Params) startClient(svc *s3.S3) {
 					fmt.Printf("there was a read error: %v , %v", resp, err)
 				}
 				if strings.Contains(params.operations, "ranges") {
-				//if doing ranged reads, use an alternate calc.
+					//if doing ranged reads, use an alternate calc.
 					if numBytes != params.rangeSize {
 						err = fmt.Errorf("expected range length %d, actual %d", params.rangeSize, numBytes)
 					}
-				
-				}else {
+
+				} else {
 					if numBytes != params.objectSize {
 						err = fmt.Errorf("expected object length %d, actual %d", params.objectSize, numBytes)
 					}
@@ -913,8 +914,8 @@ type Params struct {
 	batchSize        int
 	numClients       uint
 	objectSize       int64
-	rangeSize       int64
-	numRequests	    int64
+	rangeSize        int64
+	numRequests      int64
 	partSize         int64
 	multiUploaders   int
 	multipart        bool
@@ -955,7 +956,7 @@ func (params Params) String() string {
 	if strings.Contains(params.operations, "ranges") {
 		output += fmt.Sprintf("totalRequests:       %d\n", params.numRequests)
 	}
-	
+
 	output += fmt.Sprintf("batchSize:       %d\n", params.batchSize)
 	if params.multipart {
 		output += fmt.Sprintf("multipart enabled:       %v\n", params.multipart)
@@ -964,7 +965,7 @@ func (params Params) String() string {
 	//calculate the total size of the test
 	totalSize := int64(params.numSamples) * params.objectSize
 	output += fmt.Sprintf("Total size of data set : %0.4f GB\n", float64(totalSize)/(1024*1024*1024))
-    
+
 	output += fmt.Sprintf("verbose:       %v\n", params.verbose)
 	return output
 }
@@ -974,7 +975,7 @@ type Result struct {
 	operation        string
 	bytesTransmitted int64
 	numErrors        int
-	numOps       int64
+	numOps           int64
 	opDurations      []float64
 	totalDuration    time.Duration
 }
