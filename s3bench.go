@@ -43,6 +43,7 @@ import (
 )
 
 const (
+	version      = "Version 1.0"
 	opRead       = "Read"
 	opWrite      = "Write"
 	opRangedRead = "Ranged-Read"
@@ -158,6 +159,7 @@ func main() {
 
 		verbose: *verbose,
 	}
+	fmt.Println(version)
 	fmt.Println(params)
 	fmt.Println()
 
