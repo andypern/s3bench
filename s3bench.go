@@ -79,7 +79,10 @@ func main() {
 	verbose := flag.Bool("verbose", false, "print verbose per thread status")
 	disableMD5 := flag.Bool("disableMD5", true, "for v4 auth: disable source md5sum calcs (faster)")
 	cpuprofile := flag.Bool("cpuprofile", false, "profile this mofo")
-	moreRando := flag.Bool("moreRando", false, "moreRando")
+//	moreRando := flag.Bool("moreRando", false, "moreRando")
+	moreRando := flag.Int("moreRando", 0, "moreRando: 0 = disable. 1 = betterSlicer.  2 = DO  method.")
+
+
 	chunkSize := flag.Int64("chunkSize", 31*1024, "When using -moreRando : chunk size to defeat dedup.")
 
 	flag.Parse()
@@ -370,6 +373,34 @@ func makeData(dataSize int64) []byte {
 
 }
 
+//this is DO specific
+
+/*
+
+ where pio.Pattern is a random r.Int63() that was queued into the channel for each block ahead of time
+ */
+
+func doGenerator(dataSize int64) []byte {
+
+
+	/* their original code:
+	buffer := make([]byte, blockSize, blockSize)
+	for pio := range workChan {
+		ra := rand.New(rand.NewSource(pio.Pattern))
+		ra.Read(buffer)
+		numBytesWritten, err := w.WriteAt(buffer, pio.Offset)
+*/
+
+// my mods to simplify integration here.
+
+	buffer := make([]byte, dataSize, dataSize)
+	randoSeed := mrand.Int63()
+	ra := mrand.New(mrand.NewSource(randoSeed))
+	ra.Read(buffer)
+	return buffer
+
+}
+
 func betterSlicer(chunkSize int64) []byte {
 
 	/*basically, just return a slice of the bufferbytes slice from a random offset. The idea is this:
@@ -406,7 +437,7 @@ func betterSlicer(chunkSize int64) []byte {
 
 }
 
-func sliceBuilder(dataSize int64, moreRando bool, chunkSize int64) []byte {
+func sliceBuilder(dataSize int64, moreRando int, chunkSize int64) []byte {
 
 	/*
 
@@ -431,7 +462,7 @@ func sliceBuilder(dataSize int64, moreRando bool, chunkSize int64) []byte {
 	}
 
 	byteStorage := make([]byte, chunkSize, dataSize)
-	if moreRando {
+	if moreRando == 1 {
 
 		//set initial cursor to zero?
 		byteStorage = byteStorage[:0]
@@ -453,8 +484,10 @@ func sliceBuilder(dataSize int64, moreRando bool, chunkSize int64) []byte {
 			partNumber++
 		}
 
-	} else {
+	} else if moreRando == 0 {
 		byteStorage = betterSlicer(dataSize)
+	} else if moreRando == 2 {
+		byteStorage = doGenerator(dataSize)
 	}
 
 	return byteStorage
@@ -929,7 +962,7 @@ type Params struct {
 	endpoints        []string
 	verbose          bool
 	disableMD5       bool
-	moreRando        bool
+	moreRando        int
 	chunkSize        int64
 }
 
